@@ -1,0 +1,169 @@
+---
+title: "STA 141A - Logistic Regression"
+author: "Colin Young"
+date: "11/27/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+### Load data and associated libraries
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(GGally)
+ Water_pond_tanks_2021 <- read.csv("C:/Users/Bztob/OneDrive/Desktop/One Drive/STA 141A/Project/Water_pond_tanks_2021.csv")
+```
+
+### Data Cleanup
+
+```{r}
+n_distinct(Water_pond_tanks_2021$Type.Water.Body) # There are 4 types of freshwater sources analyzed
+n_distinct(Water_pond_tanks_2021$State.Name) # There are 32 states
+Water_quality <- Water_pond_tanks_2021 %>%
+    mutate(Type.Water.Body = recode(Type.Water.Body, Wetland = 'Wetland', POND = 'Pond', TANK =  'Tank' , LAKE = "Lake" ))
+Water_quality <- tibble(Water_quality)
+Water_quality
+Water_quality <- Water_quality %>% select(-c("Total.Coliform..MPN.100ml...Min.", "Total.Coliform..MPN.100ml...Max."))
+
+#Recode Variables to be In Correct Data Class
+Water_quality$STN.Code <- as.character(Water_quality$STN.Code)
+
+Water_quality$pH..Min. <- as.numeric(Water_quality$pH..Min.)
+Water_quality$pH..Max. <- as.numeric(Water_quality$pH..Max.)
+
+Water_quality$Dissolved.Oxygen..mg.L...Max. <- as.numeric(Water_quality$Dissolved.Oxygen..mg.L...Max.)
+Water_quality$Dissolved.Oxygen..mg.L...Min. <- as.numeric(Water_quality$Dissolved.Oxygen..mg.L...Min.)
+
+Water_quality$Conductivity...mhos.cm...Min. <- as.numeric(Water_quality$Conductivity...mhos.cm...Min.)
+Water_quality$Conductivity...mhos.cm...Max. <- as.numeric(Water_quality$Conductivity...mhos.cm...Max.)
+
+Water_quality$BOD..mg.L...Min. <- as.numeric(Water_quality$BOD..mg.L...Min.)
+Water_quality$BOD..mg.L...Max. <- as.numeric(Water_quality$BOD..mg.L...Max.)
+
+Water_quality$Nitrate.N...Nitrite.N.mg.L...Min. <- as.numeric(Water_quality$Nitrate.N...Nitrite.N.mg.L...Min.)
+Water_quality$Nitrate.N...Nitrite.N.mg.L...Max. <- as.numeric(Water_quality$Nitrate.N...Nitrite.N.mg.L...Max.)
+
+Water_quality$Fecal.Coliform..MPN.100ml...Min. <- as.numeric(Water_quality$Fecal.Coliform..MPN.100ml...Min.)
+Water_quality$Fecal.Coliform..MPN.100ml...Max. <- as.numeric(Water_quality$Fecal.Coliform..MPN.100ml...Max.)
+attach(Water_quality)
+
+
+head(Water_quality)
+```
+
+In this dataset, we have some variables that could be highly correlated to one another.  This is called collinearity, and could result in some less reliable statisical inference.  To minimize the chance of high collinearity among the predictors, we will split the data into two different equations.  One equation will contain all min predictor variables and the other equation will contain all the max predictor variables.  
+
+To determine which model seems to be a better fit to our data, we will analyze each model's deviance and AIC values.  These values measure the goodness of fit of the generalized linear model.  The model that has the lowest AIC and deviance is the model that shows the relationships between our response and predictor variables best.  The summary of the logistic equation for the min values is as follows:
+
+### Logistic Equation for Min Predictor Variables
+
+```{r}
+colnames(Water_quality)
+Min_water_quality <- Water_quality %>% select(-c("Temperature..C..Max.",
+                                           "Dissolved.Oxygen..mg.L...Max.",
+                                           "pH..Max.",
+                                           "Conductivity...mhos.cm...Max.",
+                                           "BOD..mg.L...Max.",
+                                           "Nitrate.N...Nitrite.N.mg.L...Max.",
+                                           "Fecal.Coliform..MPN.100ml...Max."
+                                           ))
+
+Min_water_quality$High_Risk <- case_when(
+  Min_water_quality$Fecal.Coliform..MPN.100ml...Min. > 10 ~ T,
+  Min_water_quality$Fecal.Coliform..MPN.100ml...Min. <= 10 ~ F)
+
+head(Min_water_quality)
+
+fitfull <- glm(High_Risk ~ . -STN.Code -Name.of.Monitoring.Location -State.Name -Fecal.Coliform..MPN.100ml...Min., family = binomial(link = "logit"), data = Min_water_quality)
+summary(fitfull)
+```
+
+### Logistic Equation for Max Predictor Variables
+
+```{r}
+colnames(Water_quality)
+Water_pond_tanks_2021$Fecal.Coliform..MPN.100ml...Min.
+Max_water_quality <- Water_quality %>% select(-c("Temperature..C..Min.",
+                                           "Dissolved.Oxygen..mg.L...Min.",
+                                           "pH..Min.",
+                                           "Conductivity...mhos.cm...Min.",
+                                           "BOD..mg.L...Min.",
+                                           "Nitrate.N...Nitrite.N.mg.L...Min.",
+                                           "Fecal.Coliform..MPN.100ml...Min."
+                                           ))
+
+Max_water_quality$High_Risk <- case_when(
+  Max_water_quality$Fecal.Coliform..MPN.100ml...Max. > 10 ~ T,
+  Max_water_quality$Fecal.Coliform..MPN.100ml...Max. <= 10 ~ F)
+
+head(Max_water_quality)
+
+fitfullB <- glm(High_Risk ~ . -STN.Code -Name.of.Monitoring.Location -State.Name -Fecal.Coliform..MPN.100ml...Max., family = binomial(link = "logit"), data = Max_water_quality)
+summary(fitfullB)
+```
+
+#Evaluation of Models
+##Min full model evaluation
+```{r}
+library(caret)
+colnames(Water_quality)
+Min_water_quality <- Water_quality %>% select(-c("Temperature..C..Max.",
+                                           "Dissolved.Oxygen..mg.L...Max.",
+                                           "pH..Max.",
+                                           "Conductivity...mhos.cm...Max.",
+                                           "BOD..mg.L...Max.",
+                                           "Nitrate.N...Nitrite.N.mg.L...Max.",
+                                           "Fecal.Coliform..MPN.100ml...Max."
+                                           ))
+
+Min_water_quality$High_Risk <- case_when(
+  Min_water_quality$Fecal.Coliform..MPN.100ml...Min. > 10 ~ T,
+  Min_water_quality$Fecal.Coliform..MPN.100ml...Min. <= 10 ~ F)
+
+Min_water_quality <- Min_water_quality[complete.cases(Min_water_quality),]
+Min_water_quality$High_Risk <- as.character(Min_water_quality$High_Risk)
+head(Min_water_quality)
+as.factor(Min_water_quality$High_Risk)
+
+Min_full_model <- fitfull <- glm(High_Risk ~ . -STN.Code -Name.of.Monitoring.Location -State.Name -Fecal.Coliform..MPN.100ml...Min., family = binomial(link = "logit"), data = Min_water_quality)
+summary(fitfull)
+
+Known_value <- ifelse(Min_water_quality$High_Risk == T, "High Risk", "Low Risk") 
+Known_value <- factor(Known_value, levels = c("High Risk", "Low Risk"))
+
+Predicted_value <- ifelse(Min_full_model$fitted.values > .5, "High Risk", "Low Risk")
+Predicted_value <-factor(Predicted_value, levels = c("High Risk", "Low Risk"))
+
+MR <- mean(Predicted_value !=  Known_value)
+MR
+confusionMatrix(Known_value, Predicted_value)
+
+summary(fitfull)
+
+Min_water_quality <- Water_quality %>% select(-c("Temperature..C..Max.",
+                                           "Dissolved.Oxygen..mg.L...Max.",
+                                           "pH..Max.",
+                                           "Conductivity...mhos.cm...Max.",
+                                           "BOD..mg.L...Max.",
+                                           "Nitrate.N...Nitrite.N.mg.L...Max.",
+                                           "Fecal.Coliform..MPN.100ml...Max."
+                                           ))
+
+Min_water_quality$High_Risk <- case_when(
+  Min_water_quality$Fecal.Coliform..MPN.100ml...Min. > 10 ~ T,
+  Min_water_quality$Fecal.Coliform..MPN.100ml...Min. <= 10 ~ F)
+
+Min_water_quality <- Min_water_quality[complete.cases(Min_water_quality),]
+
+fitreduced_min <- glm(formula = High_Risk ~ . - STN.Code - Name.of.Monitoring.Location - 
+    State.Name - Fecal.Coliform..MPN.100ml...Min. -Type.Water.Body, family = binomial(link = "logit"), 
+    data = Min_water_quality)
+anova(fitfull, fitreduced_min, test = "LRT") # The null hypothesis of the LTR test is that the excluded parameters 
+
+```
+
