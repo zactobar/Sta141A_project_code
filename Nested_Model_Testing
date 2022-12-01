@@ -1,0 +1,162 @@
+There are certain assumptions of logistic regression models. We assume the outcome of interest is binary, the observations are independent of one another, there is a linear relationship between the log odds of the outcome and the predictors, there is minimal collinearity, there are no extreme outliers, and the sample size should be sufficiently large.
+
+We will examine the appropriate of each assumption in order
+1.) Binary response, the response here is a boolean vector of True or False, which indicates whether the observation in question is high risk, or low risk. An observation is coded a True for the high risk variable if the minimum MPN of fecal coliforms in that observation is >10; an observation is coded as a False for the high risk variable if the minimum MPN of fecal coliforms is between 0 and 10. 
+```{r}
+is.logical(Min_water_quality$High_Risk)
+```
+2.)There is a linear relation between the log-odds and the predictors. We examine this by performing a ggpairs plot or a scatterplot matrix to observe if the relationship between the log-odds and the value of the predictor is linear
+```{r}
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+# Select only numeric predictors
+Data <- Min_water_quality[complete.cases(Min_water_quality),] %>% 
+  dplyr::select_if(is.numeric) %>% select(-Fecal.Coliform..MPN.100ml...Min.)
+predictors <- colnames(Data)
+predictors
+
+probabilities <- fitfull$fitted.values
+
+# Bind the logit and tidying the data for plot
+Data <- Data %>%
+  mutate(logit = log(probabilities/(1-probabilities))) %>%
+  gather(key = "predictors", value = "predictor.value", -logit)
+tail(Data)
+ggplot(Data, aes(logit, predictor.value))+
+  geom_point(size = 0.5, alpha = 0.5) +
+  geom_smooth(method = "loess") + 
+  theme_bw() + 
+  facet_wrap(~predictors, scales = "free_y")
+
+```
+It seems like BOD exhibits a pretty linear relationship. The other variables appear a bit harder to see since each has a few points that really skew the trend. Let's try a log transformation of these variables
+
+```{r}
+Data <- Min_water_quality %>%
+  dplyr::select_if(is.numeric) %>% select(-Fecal.Coliform..MPN.100ml...Min.)
+Data$Temperature..C..Min. <- log(Data$Temperature..C..Min.)
+Data$pH..Min. <-  log(Data$pH..Min.)
+Data$Conductivity...mhos.cm...Min. <- log(Data$Conductivity...mhos.cm...Min.)
+Data$Nitrate.N...Nitrite.N.mg.L...Min. <- log(Data$Nitrate.N...Nitrite.N.mg.L...Min.)
+Data$Dissolved.Oxygen..mg.L...Min. <- log(Data$Dissolved.Oxygen..mg.L...Min.)
+predictors <- colnames(Data)
+
+Data <- Data %>%
+  mutate(logit = log(probabilities/(1-probabilities))) %>%
+  gather(key = "predictors", value = "predictor.value", -logit)
+tail(Data)
+ggplot(Data, aes(logit, predictor.value))+
+  geom_point(size = 0.5, alpha = 0.5) +
+  geom_smooth(method = "loess") + 
+  theme_bw() + 
+  facet_wrap(~predictors, scales = "free_y")
+```
+
+Log transformations didn't really improve the relationship too well. It looks like we can consider the log transformation of minimum temperature but we may have to consider using polynomial terms for the other predictors.
+```{r}
+library(dplyr)
+library(tidyverse)
+Data <- Min_water_quality %>%
+  dplyr::select_if(is.numeric) %>% select(-Fecal.Coliform..MPN.100ml...Min.)
+Data$Temperature..C..Min. <- exp(Data$Temperature..C..Min.)
+Data$pH..Min. <-  exp(Data$pH..Min.)
+Data$Conductivity...mhos.cm...Min. <- exp(Data$Conductivity...mhos.cm...Min.)
+Data$Nitrate.N...Nitrite.N.mg.L...Min. <- exp(Data$Nitrate.N...Nitrite.N.mg.L...Min.)
+Data$Dissolved.Oxygen..mg.L...Min. <- exp(Data$Dissolved.Oxygen..mg.L...Min.)
+predictors <- colnames(Data)
+
+
+# Select only numeric predictors
+Data <- Min_water_quality[complete.cases(Min_water_quality),] %>% 
+  dplyr::select_if(is.numeric) %>% select(-Fecal.Coliform..MPN.100ml...Min.)
+predictors <- colnames(Data)
+predictors
+
+probabilities <- fitfull$fitted.values
+
+# Bind the logit and tidying the data for plot
+Data <- Data %>%
+  mutate(logit = log(probabilities/(1-probabilities))) %>%
+  gather(key = "predictors", value = "predictor.value", -logit)
+tail(Data)
+ggplot(Data, aes(logit, predictor.value))+
+  geom_point(size = 0.5, alpha = 0.5) +
+  geom_smooth(method = "loess") + 
+  theme_bw() + 
+  facet_wrap(~predictors, scales = "free_y")
+
+```
+Exponential transformation similarly doesn't work.
+
+```{r}
+Min_log_model_data <- Min_water_quality %>% select(-STN.Code, -Name.of.Monitoring.Location, -State.Name, -Fecal.Coliform..MPN.100ml...Min., -Type.Water.Body)
+head(Min_log_model_data)
+colnames(Min_log_model_data)
+Min_log_model_data <- Min_log_model_data %>% rename(c(Temp_Min = Temperature..C..Min., Conductivity_Min = Conductivity...mhos.cm...Min., Nitrate_Nitrite_Min = Nitrate.N...Nitrite.N.mg.L...Min., pH_Min = pH..Min., Diss_Oxy_Min = Dissolved.Oxygen..mg.L...Min., BOD_Min = BOD..mg.L...Min.,))
+colnames(Min_log_model_data)
+Min_log_model_data <- Min_log_model_data[complete.cases(Min_log_model_data),]
+
+fitfullA <- glm(High_Risk ~ . + I(Conductivity_Min^2) + I(Nitrate_Nitrite_Min^2) + I(pH_Min^2) + I(Diss_Oxy_Min^2) + I(Temp_Min^2), family = binomial(link = "logit"), data = Min_log_model_data)
+summary(fitfullA)
+
+#We see significance of the polynomial terms for some variables but not all, we will need to perform nested #model testing to determine what variables to drop.
+
+fitB <- glm(High_Risk ~ . -Temp_Min + I(Conductivity_Min^2) + I(Nitrate_Nitrite_Min^2) + I(pH_Min^2) + I(Diss_Oxy_Min^2), family = binomial(link = "logit"), data = Min_log_model_data)
+
+summary(fitB)
+
+fitC <- glm(High_Risk ~ . -Temp_Min -Conductivity_Min -Nitrate_Nitrite_Min + I(Nitrate_Nitrite_Min^2) + I(pH_Min^2) + I(Diss_Oxy_Min^2), family = binomial(link = "logit"), data = Min_log_model_data)
+summary(fitC)
+
+fitD <- glm(High_Risk ~ . -Temp_Min -Conductivity_Min -Nitrate_Nitrite_Min + I(Nitrate_Nitrite_Min^2) + I(pH_Min^2) + I(Diss_Oxy_Min^2) + I(Nitrate_Nitrite_Min^3) + I(pH_Min^3) + I(Diss_Oxy_Min^3), family = binomial(link = "logit"), data = Min_log_model_data)
+summary(fitD)
+
+fitE <- glm(High_Risk ~ . -Temp_Min -Conductivity_Min -Nitrate_Nitrite_Min + I(Nitrate_Nitrite_Min^2) + I(pH_Min^2) + I(Diss_Oxy_Min^2)  + I(pH_Min^3) + I(pH_Min^3), family = binomial(link = "logit"), data = Min_log_model_data)
+summary(fitE)
+
+anova(fitfullA, fitB, test = "LRT") # Results of this tell us to reject the null hypothesis at alpha = .01, #fit B is not better than fullfitA using polynomial terms
+
+anova(fitfullA, fitC, test = "LRT")  # Results of this tell us to reject the null hypothesis at alpha = .01, #fit B is not better than fullfitA using polynomial terms
+
+anova(fitfullA, fitD, test = "LRT")
+
+anova(fitfullA, fitE, test = "LRT")
+
+#So it seems like dropping too many variables causes issues in nested model testing we'll drop the variable #with the highest p-value term by term to identify the most parsimonious model in effectively a backwards #selection from the full model
+
+fitfullA <- glm(High_Risk ~ . + I(Conductivity_Min^2) + I(Nitrate_Nitrite_Min^2) + I(pH_Min^2) + I(Diss_Oxy_Min^2) + I(Temp_Min^2), family = binomial(link = "logit"), data = Min_log_model_data)
+summary(fitfullA)
+#Temp_Min is the highest drop that first
+fitB <- glm(High_Risk ~ . -Temp_Min + I(Conductivity_Min^2) + I(Nitrate_Nitrite_Min^2) + I(pH_Min^2) + I(Diss_Oxy_Min^2) + I(Temp_Min^2), family = binomial(link = "logit"), data = Min_log_model_data)
+summary(fitB)
+
+anova(fitfullA, fitB, test="LRT") # prefer fit B
+
+#drop the polynomial term of conductivity
+fitC <- glm(High_Risk ~ . -Temp_Min + I(Nitrate_Nitrite_Min^2) + I(pH_Min^2) + I(Diss_Oxy_Min^2) + I(Temp_Min^2), family = binomial(link = "logit"), data = Min_log_model_data)
+summary(fitC)
+
+anova(fitB, fitC, test="LRT") # prefer model C
+
+fitD <- glm(High_Risk ~ . -Temp_Min -Nitrate_Nitrite_Min + I(Nitrate_Nitrite_Min^2) + I(pH_Min^2) + I(Diss_Oxy_Min^2) + I(Temp_Min^2), family = binomial(link = "logit"), data = Min_log_model_data)
+summary(fitD)
+
+anova(fitC, fitD, test="LRT") # prefer model D
+
+fitE <- glm(High_Risk ~ . -Temp_Min -Nitrate_Nitrite_Min -Conductivity_Min + I(Nitrate_Nitrite_Min^2) + I(pH_Min^2) + I(Diss_Oxy_Min^2) + I(Temp_Min^2), family = binomial(link = "logit"), data = Min_log_model_data)
+summary(fitE)
+anova(fitD, fitE, test="LRT") # reject null we cannot exclude conductivity, fit D should be prefered
+
+anova(fitfullA, fitD, test="LRT") # we see model D is better than the full model
+
+summary(fitD)
+
+```
+So I've now fitted a multitude of different models with different terms and different polynomials. We performed a bunch of nested model testing to come to the conclusion that D fitting polynomial terms is the best of the considered models. Because we are now performing polynomial logistic regression, I no longer assume a linear relationship but that the relationships may be linear or curvilinear. 
+
+4.) there is minimal collinearity
+```{r}
+ggpairs(Min_log_model_data)
+```
+We see some moderate correlation between certain variables but it's not very large. The largest correlation is between dissolved oxygen and temperature (this makes sense, there is a known relationship between the solubility of gases in liquids and the temperature of the liquid). To account for this I incorporated some interaction terms in my logistic regression model, but as I found the two-way interaction term corresponding to the relationship was not statistically significant. I also found the two-way interaction term corresponding to the relationship between dissolved solids (BOD) and Nitrate/Nitrite concentration to not be statistically significant. Being that those two-way interactions between minimum temperature and dissolved oxygen, along with dissolved solids and nitrate/nitrite concentrations exhibited the highest correlation coefficient values and did not produce a meaningful two:way interaction term in the full model we can assume that there is minimal collinearity.
