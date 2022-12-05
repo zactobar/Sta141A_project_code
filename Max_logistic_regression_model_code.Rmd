@@ -1,0 +1,543 @@
+---
+title: "Final Max Logistic Regression Model"
+author: "Sohan Patil"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Data Load in and Cleaning ##load data
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(GGally)
+Water_pond_tanks_2021 <- read.csv("~/Desktop/Fall_2022/STA141A/FinalProject/Water_pond_tanks_2021.csv")
+
+```
+
+## Data Cleanup
+
+```{r}
+n_distinct(Water_pond_tanks_2021$Type.Water.Body) # There are 4 types of freshwater sources analyzed
+n_distinct(Water_pond_tanks_2021$State.Name) # There are 32 states
+Water_quality <- Water_pond_tanks_2021 %>%
+    mutate(Type.Water.Body = recode(Type.Water.Body, Wetland = 'Wetland', POND = 'Pond', TANK =  'Tank' , LAKE = "Lake" ))
+Water_quality <- tibble(Water_quality)
+Water_quality <- Water_quality %>% select(-c("Total.Coliform..MPN.100ml...Min.", "Total.Coliform..MPN.100ml...Max."))
+
+#Recode Variables to be In Correct Data Class
+Water_quality$STN.Code <- as.character(Water_quality$STN.Code)
+
+Water_quality$pH..Min. <- as.numeric(Water_quality$pH..Min.)
+Water_quality$pH..Max. <- as.numeric(Water_quality$pH..Max.)
+
+Water_quality$Dissolved.Oxygen..mg.L...Max. <- as.numeric(Water_quality$Dissolved.Oxygen..mg.L...Max.)
+Water_quality$Dissolved.Oxygen..mg.L...Min. <- as.numeric(Water_quality$Dissolved.Oxygen..mg.L...Min.)
+
+Water_quality$Conductivity...mhos.cm...Min. <- as.numeric(Water_quality$Conductivity...mhos.cm...Min.)
+Water_quality$Conductivity...mhos.cm...Max. <- as.numeric(Water_quality$Conductivity...mhos.cm...Max.)
+
+Water_quality$BOD..mg.L...Min. <- as.numeric(Water_quality$BOD..mg.L...Min.)
+Water_quality$BOD..mg.L...Max. <- as.numeric(Water_quality$BOD..mg.L...Max.)
+
+Water_quality$Nitrate.N...Nitrite.N.mg.L...Min. <- as.numeric(Water_quality$Nitrate.N...Nitrite.N.mg.L...Min.)
+Water_quality$Nitrate.N...Nitrite.N.mg.L...Max. <- as.numeric(Water_quality$Nitrate.N...Nitrite.N.mg.L...Max.)
+
+Water_quality$Fecal.Coliform..MPN.100ml...Min. <- as.numeric(Water_quality$Fecal.Coliform..MPN.100ml...Min.)
+Water_quality$Fecal.Coliform..MPN.100ml...Max. <- as.numeric(Water_quality$Fecal.Coliform..MPN.100ml...Max.)
+attach(Water_quality)
+head(Water_quality)
+```
+
+In this dataset, we have some variables that could be highly correlated to one another. This is called collinearity, and could result in some less reliable statisical inference. To minimize the chance of high collinearity among the predictors, we will split the data into two different equations. One equation will contain all min predictor variables and the other equation will contain all the max predictor variables.
+
+To determine which model seems to be a better fit to our data, we will analyze each model's deviance and AIC values. These values measure the goodness of fit of the generalized linear model. The model that has the lowest AIC and deviance is the model that shows the relationships between our response and predictor variables best. The summary of the logistic equation for the min values is as follows:
+
+# Logistic Equation for Max Predictor Variables
+
+There are certain assumptions of logistic regression models. We assume the outcome of interest is binary, the observations are independent of one another, there is a linear relationship between the log odds of the outcome and the predictors, there is minimal collinearity, there are no extreme outliers, and the sample size should be sufficiently large.
+
+```{r}
+Max_water_quality <- Water_quality %>% select(-c("Temperature..C..Min.",
+                                           "Dissolved.Oxygen..mg.L...Min.",
+                                           "pH..Min.",
+                                           "Conductivity...mhos.cm...Min.",
+                                           "BOD..mg.L...Min.",
+                                           "Nitrate.N...Nitrite.N.mg.L...Min.",
+                                           "Fecal.Coliform..MPN.100ml...Min."
+                                           ))
+
+Max_water_quality$High_Risk <- case_when(
+  Max_water_quality$Fecal.Coliform..MPN.100ml...Max. > 10 ~ T,
+  Max_water_quality$Fecal.Coliform..MPN.100ml...Max. <= 10 ~ F)
+```
+
+## Logistic Regression Model Assumptions and Diagnostics
+
+We will examine the appropriateness of each assumption in order 1.) Binary response, the response here is a boolean vector of True or False, which indicates whether the observation in question is high risk, or low risk. An observation is coded a True for the high risk variable if the minimum MPN of fecal coliforms in that observation is \>10; an observation is coded as a False for the high risk variable if the minimum MPN of fecal coliforms is between 0 and 10.
+
+```{r}
+is.logical(Max_water_quality$High_Risk)
+```
+
+2.) The observations are independent of each other, the number of complete observations is 541, which corresponds to the length of STN code vector. As such we may assume that each observation corresponds to a unique location designated by the STN code. We do not see duplicate observations for the same STN code; subsequently we may assume that all the observation correspond to different locations and are therefore independent.
+
+3.)There is a linear relation between the log-odds and the predictors. We examine this by ploting the relationship between the log-odds and the values of the predictor
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+Max_water_quality <- Water_quality %>% select(-c("Temperature..C..Min.",
+                                           "Dissolved.Oxygen..mg.L...Min.",
+                                           "pH..Min.",
+                                           "Conductivity...mhos.cm...Min.",
+                                           "BOD..mg.L...Min.",
+                                           "Nitrate.N...Nitrite.N.mg.L...Min.",
+                                           "Fecal.Coliform..MPN.100ml...Min."
+                                           ))
+
+Max_water_quality$High_Risk <- case_when(
+  Max_water_quality$Fecal.Coliform..MPN.100ml...Max. > 10 ~ T,
+  Max_water_quality$Fecal.Coliform..MPN.100ml...Max. <= 10 ~ F)
+
+Max_water_quality <- Max_water_quality[complete.cases(Max_water_quality),]
+
+Max_log_model_data <- Max_water_quality %>% select(-STN.Code, -Name.of.Monitoring.Location, -State.Name, -Fecal.Coliform..MPN.100ml...Max., -Type.Water.Body)
+head(Max_log_model_data)
+colnames(Max_log_model_data)
+Max_log_model_data <- Max_log_model_data %>% rename(c(Temp_Max = Temperature..C..Max., Conductivity_Max = Conductivity...mhos.cm...Max., Nitrate_Nitrite_Max = Nitrate.N...Nitrite.N.mg.L...Max., pH_Min = pH..Max., Diss_Oxy_Max = Dissolved.Oxygen..mg.L...Max., BOD_Min = BOD..mg.L...Max.,))
+colnames(Max_log_model_data)
+Max_log_model_data <- Max_log_model_data[complete.cases(Max_log_model_data),]
+
+fitfull <- glm(High_Risk ~ ., family = binomial(link = "logit"), data = Max_log_model_data)
+summary(fitfull)
+
+# Select only numeric predictors
+Data <- Max_water_quality[complete.cases(Max_water_quality),] %>% 
+  dplyr::select_if(is.numeric) %>% select(-Fecal.Coliform..MPN.100ml...Max.)
+predictors <- colnames(Data)
+predictors
+
+probabilities <- fitfull$fitted.values
+
+# Bind the logit and tidying the data for plot
+Data <- Data %>%
+  mutate(logit = log(probabilities/(1-probabilities))) %>%
+  gather(key = "predictors", value = "predictor.value", -logit)
+tail(Data)
+ggplot(Data, aes(logit, predictor.value))+
+  geom_point(size = 0.5, alpha = 0.5) +
+  geom_smooth(method = "loess") + 
+  theme_bw() + 
+  facet_wrap(~predictors, scales = "free_y")
+```
+
+It seems like BOD and Conductivity exhibit a pretty linear relationship. The other variables appear a bit harder to see since each has a few points that really skew the trend. We'll try a bunch of different data transformations.
+
+###Data transformations
+
+```{r}
+Data <- Max_water_quality[complete.cases(Max_water_quality),] %>% 
+  dplyr::select_if(is.numeric) %>% select(-Fecal.Coliform..MPN.100ml...Max.)
+Data$Temperature..C..Max. <- log(Data$Temperature..C..Max.)
+Data$pH..Max. <-  log(Data$pH..Max.)
+Data$Conductivity...mhos.cm...Max. <- log(Data$Conductivity...mhos.cm...Max.)
+Data$Nitrate.N...Nitrite.N.mg.L...Max. <- log(Data$Nitrate.N...Nitrite.N.mg.L...Max.)
+Data$Dissolved.Oxygen..mg.L...Max. <- log(Data$Dissolved.Oxygen..mg.L...Max.)
+predictors <- colnames(Data)
+
+Data <- Data %>%
+  mutate(logit = log(probabilities/(1-probabilities))) %>%
+  gather(key = "predictors", value = "predictor.value", -logit)
+ggplot(Data, aes(logit, predictor.value))+
+  geom_point(size = 0.5, alpha = 0.5) +
+  geom_smooth(method = "loess") + 
+  theme_bw() + 
+  facet_wrap(~predictors, scales = "free_y")
+
+#log didn't work
+
+Data <- Max_water_quality[complete.cases(Max_water_quality),] %>%
+  dplyr::select_if(is.numeric) %>% select(-Fecal.Coliform..MPN.100ml...Max.)
+Data$Temperature..C..Max. <- exp(Data$Temperature..C..Max.)
+Data$pH..Max. <-  exp(Data$pH..Max.)
+Data$Conductivity...mhos.cm...Max. <- exp(Data$Conductivity...mhos.cm...Max.)
+Data$Nitrate.N...Nitrite.N.mg.L...Max. <- exp(Data$Nitrate.N...Nitrite.N.mg.L...Max.)
+Data$Dissolved.Oxygen..mg.L...Max. <- exp(Data$Dissolved.Oxygen..mg.L...Max.)
+predictors <- colnames(Data)
+
+
+# Select only numeric predictors
+Data <- Max_water_quality[complete.cases(Max_water_quality),] %>% 
+  dplyr::select_if(is.numeric) %>% select(-Fecal.Coliform..MPN.100ml...Max.)
+predictors <- colnames(Data)
+predictors
+
+probabilities <- fitfull$fitted.values
+
+# Bind the logit and tidying the data for plot
+Data <- Data %>%
+  mutate(logit = log(probabilities/(1-probabilities))) %>%
+  gather(key = "predictors", value = "predictor.value", -logit)
+tail(Data)
+ggplot(Data, aes(logit, predictor.value))+
+  geom_point(size = 0.5, alpha = 0.5) +
+  geom_smooth(method = "loess") + 
+  theme_bw() + 
+  facet_wrap(~predictors, scales = "free_y")
+
+#exp transformation doesn't work either
+
+```
+
+So the predictors cannot easily be made linear to the logit function -- as such we now consider a polynomial logistic regression model. The difficulty is in assuming how many polynomial terms describe the relationship best, as such we will try fitting a full model with all potential variables raised to the second-degree polynomial,and raised to the third-degree polynomial. For each full model we then remove terms 1 by 1 selecting the coefficient that has the highest P-value to be removed. We then fit a model with this term removed and perform a likelihood ratio test (LRT) if the LRT test indicates the excluded covariate is equal to 0 we continue with the smaller model and then remove a term from this model selecting the coefficient that has the highest P-value to be removed and test those nested models with an LRT test. We continue in this manner until we come to a model in which removing any covariate would cause us to reject the null hypothesis in the LRT test. At the end I have created a logistic regression model considering up to the third degree polynomial term, and a logistic regression model considering up to the second degree polynomial term. I tried fitting a fourth degree polynomial term and evaluating that but in model testing I ended up with the best model creating a model where most of the covariates were not statistically significant. I also assessed if model were overfit by randomly taking 10% of the high risk and low risk classes from my sample data and evaluating the performance of my models in predicting the classes of that data.
+
+### Second Degree Polynomial Nested Models
+
+```{r}
+#colnames(Water_quality)
+Max_water_quality <- Water_quality %>% select(-c("Temperature..C..Min.",
+                                           "Dissolved.Oxygen..mg.L...Min.",
+                                           "pH..Min.",
+                                           "Conductivity...mhos.cm...Min.",
+                                           "BOD..mg.L...Min.",
+                                           "Nitrate.N...Nitrite.N.mg.L...Min.",
+                                           "Fecal.Coliform..MPN.100ml...Min."
+                                           ))
+
+Max_water_quality$High_Risk <- case_when(
+  Max_water_quality$Fecal.Coliform..MPN.100ml...Max. > 10 ~ T,
+  Max_water_quality$Fecal.Coliform..MPN.100ml...Max. <= 10 ~ F)
+
+Max_water_quality <- Max_water_quality[complete.cases(Max_water_quality),]
+
+Max_log_model_data <- Max_water_quality %>% select(-STN.Code, -Name.of.Monitoring.Location, -State.Name, -Fecal.Coliform..MPN.100ml...Max., -Type.Water.Body)
+head(Max_log_model_data)
+colnames(Max_log_model_data)
+Max_log_model_data <- Max_log_model_data %>% rename(c(Temp_Max = Temperature..C..Max., Conductivity_Max = Conductivity...mhos.cm...Max., Nitrate_Nitrite_Max = Nitrate.N...Nitrite.N.mg.L...Max., pH_Max = pH..Max., Diss_Oxy_Max = Dissolved.Oxygen..mg.L...Max., BOD_Max = BOD..mg.L...Max.,))
+colnames(Max_log_model_data)
+Max_log_model_data <- Max_log_model_data[complete.cases(Max_log_model_data),]
+```
+```{r}
+twofitfullA <- glm(High_Risk ~ . + I(Conductivity_Max^2) + I(Nitrate_Nitrite_Max^2) + I(pH_Max^2) + I(Diss_Oxy_Max^2) + I(Temp_Max^2), family = binomial(link = "logit"), data = Max_log_model_data)
+summary(twofitfullA)
+```
+```{r}
+#drop the polynomial term of conductivity
+twofitB <- glm(High_Risk ~ . + I(Nitrate_Nitrite_Max^2) + I(pH_Max^2) + I(Diss_Oxy_Max^2) + I(Temp_Max^2), family = binomial(link = "logit"), data = Max_log_model_data)
+summary(twofitB)
+#anova(twofitfullA, twofitB, test="LRT") # prefer fit B
+```
+```{r}
+#drop the polynomial term of nitrate
+twofitC <- glm(High_Risk ~ . + I(pH_Max^2) + I(Diss_Oxy_Max^2) + I(Temp_Max^2), family = binomial(link = "logit"), data = Max_log_model_data)
+summary(twofitC)
+#anova(twofitB, twofitC, test="LRT") # prefer model C
+```
+```{r}
+#Remove phMax2
+twofitD <- glm(High_Risk ~ . + I(Diss_Oxy_Max^2) + I(Temp_Max^2), family = binomial(link = "logit"), data = Max_log_model_data)
+summary(twofitD)
+anova(twofitC, twofitD, test="LRT") # prefer model D
+```
+```{r}
+#Remove tempmax2
+twofitE <- glm(High_Risk ~ . + I(Diss_Oxy_Max^2), family = binomial(link = "logit"), data = Max_log_model_data)
+summary(twofitE)
+```
+```{r}
+#Remove conductivity Max
+twofitF <- glm(High_Risk ~ . -Conductivity_Max + I(Diss_Oxy_Max^2), family = binomial(link = "logit"), data = Max_log_model_data)
+summary(twofitF)
+```
+```{r}
+#Remove Disoxymax
+twofitG <- glm(High_Risk ~ . -Conductivity_Max -Diss_Oxy_Max + I(Diss_Oxy_Max^2), family = binomial(link = "logit"), data = Max_log_model_data)
+summary(twofitG)
+```
+```{r}
+#Remove Disoxymax2
+twofitH <- glm(High_Risk ~ . -Conductivity_Max -Diss_Oxy_Max, family = binomial(link = "logit"), data = Max_log_model_data)
+summary(twofitH)
+```
+
+Working down from a full model to the second degree polynomial we end up with the following model $logit = \beta_0 + \beta_{Temp_Max} + \beta_{Temp_Max} + \beta_{BOD_Max} + \beta_{Nitrate_Nitrite_Max} + \epsilon$
+
+### Third Degree Polynomial Nested Models
+
+```{r}
+trifitfullA <- glm(High_Risk ~ . + I(Conductivity_Max^2) + I(Nitrate_Nitrite_Max^2) + I(pH_Max^2) + I(Diss_Oxy_Max^2) + I(Temp_Max^2) + I(Conductivity_Max^3) + I(Nitrate_Nitrite_Max^3) + I(pH_Max^3) + I(Diss_Oxy_Max^3) + I(Temp_Max^3), family = binomial(link = "logit"), data = Max_log_model_data)
+summary(trifitfullA)
+```
+```{r}
+#Remove ConductivityMax3
+trifitfullB <- glm(High_Risk ~ . + I(Conductivity_Max^2) + I(Nitrate_Nitrite_Max^2) + I(pH_Max^2) + I(Diss_Oxy_Max^2) + I(Temp_Max^2) + I(Nitrate_Nitrite_Max^3) + I(pH_Max^3) + I(Diss_Oxy_Max^3) + I(Temp_Max^3), family = binomial(link = "logit"), data = Max_log_model_data)
+
+summary(trifitfullB)
+
+
+anova(trifitfullA, trifitfullB, test = "LRT") # fail to reject the null, prefer simpler model
+```
+```{r}
+#Remove phMax
+trifitfullC <- glm(High_Risk ~ . -pH_Max + I(Conductivity_Max^2) + I(Nitrate_Nitrite_Max^2) + I(pH_Max^2) + I(Diss_Oxy_Max^2) + I(Temp_Max^2) + I(Nitrate_Nitrite_Max^3) + I(pH_Max^3) + I(Diss_Oxy_Max^3) + I(Temp_Max^3), family = binomial(link = "logit"), data = Max_log_model_data)
+summary(trifitfullC)
+
+
+anova(trifitfullB, trifitfullC, test = "LRT") # fail to reject null, prefer simpler model
+```
+```{r}
+#Remove phMax3
+trifitfullD <- glm(High_Risk ~ . -pH_Max + I(Conductivity_Max^2) + I(Nitrate_Nitrite_Max^2) + I(pH_Max^2) + I(Diss_Oxy_Max^2) + I(Temp_Max^2) + I(Nitrate_Nitrite_Max^3) + I(Diss_Oxy_Max^3) + I(Temp_Max^3), family = binomial(link = "logit"), data = Max_log_model_data)
+summary(trifitfullD)
+
+anova(trifitfullC, trifitfullD, test = "LRT") # fail to reject null, prefer simpler model
+```
+```{r}
+#Remove ConductivityMax2
+trifitfullE <- glm(High_Risk ~ . -pH_Max + I(Nitrate_Nitrite_Max^2) + I(pH_Max^2) + I(Diss_Oxy_Max^2) + I(Temp_Max^2) + I(Nitrate_Nitrite_Max^3) + I(Diss_Oxy_Max^3) + I(Temp_Max^3), family = binomial(link = "logit"), data = Max_log_model_data)
+summary(trifitfullE)
+```
+```{r}
+anova(trifitfullD, trifitfullE, test = "LRT") # fail to reject null, prefer simpler model
+```
+```{r}
+#Remove ConductivityMax
+trifitfullF <- glm(High_Risk ~ . -pH_Max -Conductivity_Max + I(Nitrate_Nitrite_Max^2) + I(pH_Max^2) + I(Diss_Oxy_Max^2) + I(Temp_Max^2) + I(Nitrate_Nitrite_Max^3) + I(Diss_Oxy_Max^3) + I(Temp_Max^3), family = binomial(link = "logit"), data = Max_log_model_data)
+summary(trifitfullF)
+#anova(trifitfullE, trifitfullF, test = "LRT") # prefer simpler model
+```
+
+Our final model considering up to a third degree polynomial is fitF
+
+$logit = \beta_0 + \beta_{Temp_Max}x + \beta_{Diss_Oxy_Max}x + \beta_{BOD_Max}x + \beta_{Nitrate_Nitrite_Max}x + \beta_{Nitrate_Nitrite_Max}x^{2}+ \beta_{pH}x^{2} + \beta_{Diss_Oxy_Max}x^{2} + \beta_{Temp_Max}x^{2} + \beta_{Nitrate_Nitrite_Max}x^{3} + \beta_{Diss_Oxy_Max}x^{3} + \beta_{Temp_Max}x^{3} + \epsilon$
+
+### Fourth Degree Polynomial Nested Models
+
+```{r}
+fourthfitA <- glm(High_Risk ~ . + I(Conductivity_Max^2) + I(Nitrate_Nitrite_Max^2) + I(pH_Max^2) + I(Diss_Oxy_Max^2) + I(Temp_Max^2) + I(Conductivity_Max^3) + I(Nitrate_Nitrite_Max^3) + I(pH_Max^3) + I(Diss_Oxy_Max^3) + I(Temp_Max^3)+ I(Conductivity_Max^4) + I(Nitrate_Nitrite_Max^4) + I(pH_Max^4) + I(Diss_Oxy_Max^4) + I(Temp_Max^4), family = binomial(link = "logit"), data = Max_log_model_data)
+summary(fourthfitA)  
+```
+```{r}
+#Remove nitratenitritmax3
+fourthfitB <- glm(High_Risk ~ . + I(Conductivity_Max^2) + I(Nitrate_Nitrite_Max^2) + I(pH_Max^2) + I(Diss_Oxy_Max^2) + I(Temp_Max^2) + I(Conductivity_Max^3) + I(pH_Max^3) + I(Diss_Oxy_Max^3) + I(Temp_Max^3)+ I(Conductivity_Max^4) + I(Nitrate_Nitrite_Max^4) + I(pH_Max^4) + I(Diss_Oxy_Max^4) + I(Temp_Max^4), family = binomial(link = "logit"), data = Max_log_model_data)
+summary(fourthfitB)
+```
+```{r}
+#Remove DisoxyMax
+fourthfitC <- glm(High_Risk ~ . -Diss_Oxy_Max + I(Conductivity_Max^2) + I(Nitrate_Nitrite_Max^2) + I(pH_Max^2) + I(Diss_Oxy_Max^2) + I(Temp_Max^2) + I(Conductivity_Max^3) + I(pH_Max^3) + I(Diss_Oxy_Max^3) + I(Temp_Max^3)+ I(Conductivity_Max^4) + I(Nitrate_Nitrite_Max^4) + I(pH_Max^4) + I(Diss_Oxy_Max^4) + I(Temp_Max^4), family = binomial(link = "logit"), data = Max_log_model_data)
+summary(fourthfitC)
+
+anova(fourthfitA, fourthfitC, test ="LRT") # prefer model C
+```
+```{r}
+#Remove TempMax4
+fourthfitD <- glm(High_Risk ~ . -Diss_Oxy_Max + I(Conductivity_Max^2) + I(Nitrate_Nitrite_Max^2) + I(pH_Max^2) + I(Diss_Oxy_Max^2) + I(Temp_Max^2) + I(Conductivity_Max^3) + I(pH_Max^3) + I(Diss_Oxy_Max^3) + I(Temp_Max^3)+ I(Conductivity_Max^4) + I(Nitrate_Nitrite_Max^4) + I(pH_Max^4) + I(Diss_Oxy_Max^4), family = binomial(link = "logit"), data = Max_log_model_data)
+summary(fourthfitD)
+```
+```{r}
+#Remove ConductivityMax3
+fourthfitE <-  glm(High_Risk ~ . -Diss_Oxy_Max + I(Conductivity_Max^2) + I(Nitrate_Nitrite_Max^2) + I(pH_Max^2) + I(Diss_Oxy_Max^2) + I(Temp_Max^2) + I(pH_Max^3) + I(Diss_Oxy_Max^3) + I(Temp_Max^3)+ I(Conductivity_Max^4) + I(Nitrate_Nitrite_Max^4) + I(pH_Max^4) + I(Diss_Oxy_Max^4), family = binomial(link = "logit"), data = Max_log_model_data)
+summary(fourthfitE)
+```
+```{r}
+#Remove ConductivityMax4
+fourthfitF <-  glm(High_Risk ~ . -Diss_Oxy_Max + I(Conductivity_Max^2) + I(Nitrate_Nitrite_Max^2) + I(pH_Max^2) + I(Diss_Oxy_Max^2) + I(Temp_Max^2) + I(pH_Max^3) + I(Diss_Oxy_Max^3) + I(Temp_Max^3) + I(Nitrate_Nitrite_Max^4) + I(pH_Max^4) + I(Diss_Oxy_Max^4), family = binomial(link = "logit"), data = Max_log_model_data)
+summary(fourthfitF)
+anova(fourthfitD, fourthfitF, test = "LRT") # prefer simpler model F
+```
+```{r}
+#Remove ConductivityMax2
+fourthfitG <-  glm(High_Risk ~ . -Diss_Oxy_Max + I(Nitrate_Nitrite_Max^2) + I(pH_Max^2) + I(Diss_Oxy_Max^2) + I(Temp_Max^2) + I(pH_Max^3) + I(Diss_Oxy_Max^3) + I(Temp_Max^3) + I(Nitrate_Nitrite_Max^4) + I(pH_Max^4) + I(Diss_Oxy_Max^4), family = binomial(link = "logit"), data = Max_log_model_data)
+summary(fourthfitG)
+anova(fourthfitG, fourthfitF, test = "LRT")
+```
+```{r}
+#Remove pHMax
+fourthfitH <-  glm(High_Risk ~ . -Diss_Oxy_Max -pH_Max + I(Nitrate_Nitrite_Max^2) + I(pH_Max^2) + I(Diss_Oxy_Max^2) + I(Temp_Max^2) + I(pH_Max^3) + I(Diss_Oxy_Max^3) + I(Temp_Max^3) + I(Nitrate_Nitrite_Max^4) + I(pH_Max^4) + I(Diss_Oxy_Max^4), family = binomial(link = "logit"), data = Max_log_model_data)
+summary(fourthfitH)
+anova(fourthfitG, fourthfitH, test = "LRT") # fit G should be prefered even though many of it's covariates are not significant, I think this is an issue of overfitting.
+```
+```{r}
+#Remove pHMax4
+fourthfitI <-  glm(High_Risk ~ . -Diss_Oxy_Max -pH_Max + I(Nitrate_Nitrite_Max^2) + I(pH_Max^2) + I(Diss_Oxy_Max^2) + I(Temp_Max^2) + I(pH_Max^3) + I(Diss_Oxy_Max^3) + I(Temp_Max^3) + I(Nitrate_Nitrite_Max^4) + I(Diss_Oxy_Max^4), family = binomial(link = "logit"), data = Max_log_model_data)
+summary(fourthfitI)
+anova(fourthfitG, fourthfitH, test = "LRT") # fit G should be prefered even though many of it's covariates are not significant, I think this is an issue of overfitting.
+```
+```{r}
+#Remove pHMax3
+fourthfitJ <-  glm(High_Risk ~ . -Diss_Oxy_Max -pH_Max + I(Nitrate_Nitrite_Max^2) + I(pH_Max^2) + I(Diss_Oxy_Max^2) + I(Temp_Max^2) + I(Diss_Oxy_Max^3) + I(Temp_Max^3) + I(Nitrate_Nitrite_Max^4) + I(Diss_Oxy_Max^4), family = binomial(link = "logit"), data = Max_log_model_data)
+summary(fourthfitJ)
+```
+```{r}
+#Remove Disoxymax2
+fourthfitK <-  glm(High_Risk ~ . -Diss_Oxy_Max -pH_Max + I(Nitrate_Nitrite_Max^2) + I(pH_Max^2) + I(Temp_Max^2) + I(Diss_Oxy_Max^3) + I(Temp_Max^3) + I(Nitrate_Nitrite_Max^4) + I(Diss_Oxy_Max^4), family = binomial(link = "logit"), data = Max_log_model_data)
+summary(fourthfitK)
+```
+```{r}
+#Remove ConductivityMax
+fourthfitK <-  glm(High_Risk ~ . -Diss_Oxy_Max -pH_Max -Conductivity_Max + I(Nitrate_Nitrite_Max^2) + I(pH_Max^2) + I(Temp_Max^2) + I(Diss_Oxy_Max^3) + I(Temp_Max^3) + I(Nitrate_Nitrite_Max^4) + I(Diss_Oxy_Max^4), family = binomial(link = "logit"), data = Max_log_model_data)
+summary(fourthfitK)
+```
+
+
+
+## Evaluating Models
+
+We've create two possible candidate models but we have to now consider which would be preferable. We will analyze this by ROC curves and confusion matrices
+
+```{r}
+library(dplyr)
+Max_water_quality <- Water_quality %>% select(-c("Temperature..C..Min.",
+                                           "Dissolved.Oxygen..mg.L...Min.",
+                                           "pH..Min.",
+                                           "Conductivity...mhos.cm...Min.",
+                                           "BOD..mg.L...Min.",
+                                           "Nitrate.N...Nitrite.N.mg.L...Min.",
+                                           "Fecal.Coliform..MPN.100ml...Min."
+                                           ))
+
+Max_water_quality$High_Risk <- case_when(
+  Max_water_quality$Fecal.Coliform..MPN.100ml...Max. > 10 ~ T,
+  Max_water_quality$Fecal.Coliform..MPN.100ml...Max. <= 10 ~ F)
+
+Max_water_quality <- Max_water_quality[complete.cases(Max_water_quality),]
+
+Max_log_model_data <- Max_water_quality %>% select(-STN.Code, -Name.of.Monitoring.Location, -State.Name, -Fecal.Coliform..MPN.100ml...Max., -Type.Water.Body)
+
+Max_log_model_data <- Max_log_model_data %>% rename(c(Temp_Max = Temperature..C..Max., Conductivity_Max = Conductivity...mhos.cm...Max., Nitrate_Nitrite_Max = Nitrate.N...Nitrite.N.mg.L...Max., pH_Min = pH..Max., Diss_Oxy_Max = Dissolved.Oxygen..mg.L...Max., BOD_Max = BOD..mg.L...Max.,))
+Max_log_model_data <- Max_log_model_data[complete.cases(Max_log_model_data),]
+
+
+Max_log_model_data$High_Risk <- as.character(Max_water_quality$High_Risk)
+head(Max_log_model_data)
+
+
+Known_value <- ifelse(Max_log_model_data$High_Risk == T, "High Risk", "Low Risk") 
+Known_value <- factor(Known_value, levels = c("High Risk", "Low Risk"))
+
+Predicted_value_second_degree <- ifelse(twofitH$fitted.values > .5, "High Risk", "Low Risk")
+Predicted_value_second_degree <-factor(Predicted_value_second_degree, levels = c("High Risk", "Low Risk"))
+
+MR <- mean(Predicted_value_second_degree !=  Known_value)
+MR
+caret::confusionMatrix(Known_value, Predicted_value_second_degree)
+
+# now for the third degree polynomial 
+Predicted_value_third_degree <- ifelse(trifitfullF$fitted.values > .5, "High Risk", "Low Risk")
+Predicted_value_third_degree <-factor(Predicted_value_third_degree, levels = c("High Risk", "Low Risk"))
+
+MR <- mean(Predicted_value_third_degree !=  Known_value)
+MR
+caret::confusionMatrix(Known_value, Predicted_value_third_degree)
+
+#fourth degree 
+
+Predicted_value_fourth_degree <- ifelse(fourthfitK$fitted.values > .5, "High Risk", "Low Risk")
+Predicted_value_fourth_degree <-factor(Predicted_value_fourth_degree, levels = c("High Risk", "Low Risk"))
+
+MR <- mean(Predicted_value_fourth_degree !=  Known_value)
+MR
+caret::confusionMatrix(Known_value, Predicted_value_fourth_degree)
+```
+
+# ROC Curves
+
+```{r}
+library(pROC)
+Max_log_model_data$Known_Value <- Known_value
+attach(Max_log_model_data)
+#head(Max_log_model_data)
+par(pty = "s")
+roc(Known_value, twofitH$fitted.values, plot = TRUE, legacy.axes=TRUE, col="cornflowerblue", print.auc = TRUE)
+plot.roc(Known_value, trifitfullF$fitted.values, add=TRUE, col="springgreen", print.auc = TRUE, print.auc.y=.45)
+plot.roc(Known_value, fourthfitK$fitted.values, add=TRUE, col="black", print.auc = TRUE, print.auc.y=.40)
+summary(trifitfullF)
+summary(fourthfitK)
+```
+
+In this ROC curve the black curve is for a fourth degree polynomial model and the green curve corresponds to considering a third degree polynomial logistic regression model, whereas the blue line corresponds to considering a second degree polynomial logistic regression model. By this ROC curve we should prefer either the black or green model as it has a greater area under the curve than the blue. As both have the same Area under the curve, choosing a model with fewer terms is ideal and hence we choose the fourthfitK as it has less number of terms in the equation 
+
+$logit = \beta_0 + \beta_{Temp_Max} + \beta_{BOD_Max} + \beta_{NitrateNitriteMax} + \beta_{Nitrate_Nitrite_Max}x^{2} + \beta_{pH_Max}x^{2} + \beta_{Temp_Max}x^{2} + \beta_{Diss_Oxy_Max}x^{3} + \beta_{Temp_Max}x^{3} + \beta_{Nitrate_Nitrite_Max}x^{4} + \beta_{Diss_Oxy_Max}x^{4} + \epsilon$
+
+We can now return to examing model assumptions now that we have a working model.
+
+#Logistic Model Assumptions Outliers and Influential Points We cannot use the direct residuals to examine the presence of influential points; rather we use the standardized pearson's residuals to examine model diagnostics.
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(pROC)
+
+#Going based on pearsons standardized 
+plot(fourthfitK) # it seems as if potentially observation 490 may be an outlier, let's remove it and assess
+```
+```{r}
+Max_water_quality <- Water_quality %>% select(-c("Temperature..C..Min.",
+                                           "Dissolved.Oxygen..mg.L...Min.",
+                                           "pH..Min.",
+                                           "Conductivity...mhos.cm...Min.",
+                                           "BOD..mg.L...Min.",
+                                           "Nitrate.N...Nitrite.N.mg.L...Min.",
+                                           "Fecal.Coliform..MPN.100ml...Min."
+                                           ))
+
+Max_water_quality$High_Risk <- case_when(
+  Max_water_quality$Fecal.Coliform..MPN.100ml...Max. > 10 ~ T,
+  Max_water_quality$Fecal.Coliform..MPN.100ml...Max. <= 10 ~ F)
+
+Max_water_quality <- Max_water_quality[complete.cases(Max_water_quality),]
+
+Max_log_model_data <- Max_water_quality %>% select(-STN.Code, -Name.of.Monitoring.Location, -State.Name, -Fecal.Coliform..MPN.100ml...Max., -Type.Water.Body)
+
+Max_log_model_data <- Max_log_model_data %>% rename(c(Temp_Max = Temperature..C..Max., Conductivity_Max = Conductivity...mhos.cm...Max., Nitrate_Nitrite_Max = Nitrate.N...Nitrite.N.mg.L...Max., pH_Max = pH..Max., Diss_Oxy_Max = Dissolved.Oxygen..mg.L...Max., BOD_Max = BOD..mg.L...Max.,))
+Max_log_model_data <- Max_log_model_data[complete.cases(Max_log_model_data),]
+Outlier_Removed <- Max_log_model_data[-490,] 
+
+Known_value_outlier_removed <- Outlier_Removed$High_Risk
+
+
+fourthfitK_Outlier_removed <- glm(High_Risk ~ . -Diss_Oxy_Max -pH_Max -Conductivity_Max + I(Nitrate_Nitrite_Max^2) + I(pH_Max^2) + I(Temp_Max^2) + I(Diss_Oxy_Max^3) + I(Temp_Max^3) + I(Nitrate_Nitrite_Max^4) + I(Diss_Oxy_Max^4), family = binomial(link = "logit"),data = Outlier_Removed)
+summary(fourthfitK_Outlier_removed)
+summary(fourthfitK)
+
+roc(Known_value, fourthfitK$fitted.values, plot = TRUE, legacy.axes=TRUE, col="springgreen", print.auc = TRUE)
+plot.roc(Known_value_outlier_removed, fourthfitK_Outlier_removed$fitted.values, add=TRUE, col="navy", print.auc = TRUE, print.auc.y=.45)
+```
+Based on a plot of the Pearson's residuals versus the leverage it appears as if observation 490 may be a strong influential point that is exhibiting under influence on our model; however, upon removing observation 490, and using that data to develop a logistic regression equation with the same assumptions my model became just much better with an AUC of 898 compared to the AUC of 882 Here the navy curve correspond to the model fitted without the potential outlier and the green curve corresponds to with the model fitted with the potential outlier. As such we elected to remove observation 490.
+
+#Logistic Model Assumptions, Minimal Collinearity
+
+```{r}
+library(GGally)
+ggpairs(Max_log_model_data)
+```
+
+
+
+
+
+
+
+
+```{r}
+
+fit_two_way <- glm(High_Risk ~ . -Diss_Oxy_Max -pH_Max -Conductivity_Max + I(Nitrate_Nitrite_Max^2) + I(pH_Max^2) + I(Temp_Max^2) + I(Diss_Oxy_Max^3) + I(Temp_Max^3) + I(Nitrate_Nitrite_Max^4) + I(Diss_Oxy_Max^4) + Nitrate_Nitrite_Max:Diss_Oxy_Max, family = binomial(link = "logit"), data = Max_log_model_data)
+anova(fourthfitK, fit_two_way, test = "LRT") # reject null, we can include this variable
+```
+#Please check this once
+We see some moderate correlation between certain variables but it's not very large. The largest correlation is between Nitrate_Nitrite_Max and Diss_Oxy_Max.
+
+#Logistic Model Assumption, Sufficient Sample Size As we have 8 potential predictors and 541 complete observations, we feel it is safe to assume our sample size is sufficient.
+
+# Summary
+
+So after evaluating these assumptions and evaluating the performance of our model against competing models. We have come to conclusion that our model is a sufficient model for predicting the health risk to an individual as a function of the considered water quality measures. The model is once more
+
+$logit = \beta_0 + \beta_{Temp_Max} + \beta_{BOD_Max} + \beta_{NitrateNitriteMax} + \beta_{Nitrate_Nitrite_Max}x^{2} + \beta_{pH_Max}x^{2} + \beta_{Temp_Max}x^{2} + \beta_{Diss_Oxy_Max}x^{3} + \beta_{Temp_Max}x^{3} + \beta_{Nitrate_Nitrite_Max}x^{4} + \beta_{Diss_Oxy_Max}x^{4} + \epsilon$
